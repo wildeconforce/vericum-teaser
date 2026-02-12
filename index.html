@@ -823,12 +823,12 @@
     <div class="footer-links">
       <a href="#" data-i18n="footer_terms">Terms of Service</a>
       <a href="#" data-i18n="footer_privacy">Privacy Policy</a>
-      <a href="mailto:hello@vericum.com" data-i18n="footer_contact">Contact</a>
+      <a href="/cdn-cgi/l/email-protection#c3aba6afafac83b5a6b1aaa0b6aeeda0acae" data-i18n="footer_contact">Contact</a>
     </div>
     <div class="footer-copy">© 2026 Vericum Inc.</div>
   </footer>
 
-  <script>
+  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
     // ─── i18n Translations ───
     const translations = {
       en: {
@@ -1033,24 +1033,48 @@
     }
 
     // ─── Waitlist Handler ───
-    function handleWaitlist(e) {
+    async function handleWaitlist(e) {
       e.preventDefault();
       const form = e.target;
+      const btn = form.querySelector('.waitlist-btn');
       const email = form.querySelector('input[type="email"]').value;
+      
+      // Disable button while submitting
+      btn.disabled = true;
+      btn.textContent = '...';
 
-      // In production: send to Supabase or email service
-      console.log('Waitlist signup:', email);
+      try {
+        const res = await fetch('https://app.loops.so/api/v1/contacts/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer b1a281f139e985d14dcecf79defb1ff2',
+          },
+          body: JSON.stringify({
+            email: email,
+            source: 'vericum-teaser',
+            userGroup: 'waitlist',
+            language: currentLang || 'en',
+          }),
+        });
 
-      // Show success
-      const successEl = document.getElementById('waitlistSuccess');
-      if (successEl) {
-        successEl.style.display = 'block';
-        form.style.display = 'none';
-      }
-
-      // For bottom CTA form
-      if (!successEl || !form.closest('.hero')) {
-        form.innerHTML = `<div class="waitlist-success" style="display:block">${translations[currentLang]?.success_msg || translations.en.success_msg}</div>`;
+        // Show success regardless (even if duplicate)
+        const successEl = document.getElementById('waitlistSuccess');
+        if (successEl && form.closest('.hero')) {
+          successEl.style.display = 'block';
+          form.style.display = 'none';
+        } else {
+          form.innerHTML = `<div class="waitlist-success" style="display:block">${translations[currentLang]?.success_msg || translations.en.success_msg}</div>`;
+        }
+      } catch (err) {
+        // Still show success to user (email might have gone through)
+        const successEl = document.getElementById('waitlistSuccess');
+        if (successEl && form.closest('.hero')) {
+          successEl.style.display = 'block';
+          form.style.display = 'none';
+        } else {
+          form.innerHTML = `<div class="waitlist-success" style="display:block">${translations[currentLang]?.success_msg || translations.en.success_msg}</div>`;
+        }
       }
     }
 
@@ -1068,10 +1092,4 @@
       });
     }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
 
-    document.addEventListener('DOMContentLoaded', () => {
-      document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
-      setLang(currentLang);
-    });
-  </script>
-</body>
-</html>
+    document.addEventListener('DOMContentLoaded', () =

@@ -1040,41 +1040,38 @@
       const email = form.querySelector('input[type="email"]').value;
       
       // Disable button while submitting
+      const originalText = btn.textContent;
       btn.disabled = true;
       btn.textContent = '...';
 
       try {
-        const res = await fetch('https://app.loops.so/api/v1/contacts/create', {
+        const formBody = "userGroup=waitlist&mailingLists=&email=" + encodeURIComponent(email);
+        
+        const res = await fetch('https://app.loops.so/api/newsletter-form/cmlis10ld09y30i49riofo7ju', {
           method: 'POST',
+          body: formBody,
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer b1a281f139e985d14dcecf79defb1ff2',
+            'Content-Type': 'application/x-www-form-urlencoded',
           },
-          body: JSON.stringify({
-            email: email,
-            source: 'vericum-teaser',
-            userGroup: 'waitlist',
-            language: currentLang || 'en',
-          }),
         });
 
-        // Show success regardless (even if duplicate)
-        const successEl = document.getElementById('waitlistSuccess');
-        if (successEl && form.closest('.hero')) {
-          successEl.style.display = 'block';
-          form.style.display = 'none';
+        if (res.ok) {
+          const successEl = document.getElementById('waitlistSuccess');
+          if (successEl && form.closest('.hero')) {
+            successEl.style.display = 'block';
+            form.style.display = 'none';
+          } else {
+            form.innerHTML = `<div class="waitlist-success" style="display:block">${translations[currentLang]?.success_msg || translations.en.success_msg}</div>`;
+          }
         } else {
-          form.innerHTML = `<div class="waitlist-success" style="display:block">${translations[currentLang]?.success_msg || translations.en.success_msg}</div>`;
+          btn.disabled = false;
+          btn.textContent = originalText;
+          alert('Please try again.');
         }
       } catch (err) {
-        // Still show success to user (email might have gone through)
-        const successEl = document.getElementById('waitlistSuccess');
-        if (successEl && form.closest('.hero')) {
-          successEl.style.display = 'block';
-          form.style.display = 'none';
-        } else {
-          form.innerHTML = `<div class="waitlist-success" style="display:block">${translations[currentLang]?.success_msg || translations.en.success_msg}</div>`;
-        }
+        btn.disabled = false;
+        btn.textContent = originalText;
+        alert('Please try again.');
       }
     }
 

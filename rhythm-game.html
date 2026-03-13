@@ -111,13 +111,12 @@ html, body {
 /* ─── Judgment Display ─── */
 #judgment {
   position: absolute;
-  top: 38%;
+  top: 20%;
   left: 50%; transform: translateX(-50%);
   font-size: 36px; font-weight: 900;
   pointer-events: none;
   z-index: 20;
   opacity: 0;
-  transition: opacity 0.1s;
   text-shadow: 0 0 30px currentColor;
 }
 
@@ -354,7 +353,6 @@ function playHitSound(type) {
 
 function playBGBeat(time) {
   if (!audioCtx) return;
-  // Kick
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.connect(gain); gain.connect(audioCtx.destination);
@@ -364,7 +362,6 @@ function playBGBeat(time) {
   gain.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
   osc.start(time); osc.stop(time + 0.15);
 
-  // Hi-hat on offbeats
   const buf = audioCtx.createBufferSource();
   const noiseBuf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.03, audioCtx.sampleRate);
   const data = noiseBuf.getChannelData(0);
@@ -394,7 +391,7 @@ const W = () => window.innerWidth;
 const H = () => window.innerHeight;
 
 // ─── Game State ───
-let gameState = 'menu'; // menu, playing, paused, result
+let gameState = 'menu';
 let notes = [];
 let particles = [];
 let score = 0;
@@ -406,30 +403,465 @@ let feverActive = false;
 let feverTimer = 0;
 let difficulty = 'normal';
 let noteSpeed = 320;
-let beatInterval = 0.5; // seconds per beat (120 BPM)
+let beatInterval = 0.5;
 let bpm = 128;
 let songTime = 0;
 let lastBeatScheduled = -1;
-let songDuration = 45; // seconds
+let songDuration = 45;
 let songStartTime = 0;
 let lastFrameTime = 0;
 let judgmentText = '';
 let judgmentColor = '';
 let judgmentOpacity = 0;
 
-// Lane config: 4 lanes
-// Left side: 2 lanes, Right side: 2 lanes
 const LANE_COUNT = 4;
-const HIT_Y_RATIO = 0.82;
+const HIT_Y_RATIO = 0.85;
 
 const LANE_COLORS = [
-  '#ff6ec7', // pink
-  '#7c4dff', // purple
-  '#00e5ff', // cyan
-  '#ffaa00', // orange
+  '#ff6ec7',
+  '#7c4dff',
+  '#00e5ff',
+  '#ffaa00',
 ];
 
-const NOTE_TYPES = ['tap', 'tap', 'tap', 'swipe_up', 'swipe_down', 'swipe_left', 'swipe_right'];
+// ─── CHARACTER (Booty) Physics ───
+const booty = {
+  // Spring physics for each cheek
+  leftCheek: { x: 0, y: 0, vx: 0, vy: 0 },
+  rightCheek: { x: 0, y: 0, vx: 0, vy: 0 },
+  // Global rotation wobble
+  rotation: 0,
+  rotVel: 0,
+  // Scale bounce
+  scaleX: 1, scaleY: 1,
+  scaleVx: 0, scaleVy: 0,
+  // Panty slide (0 = normal, 1 = fully down)
+  pantySlide: 0,
+  pantySlideTarget: 0,
+  pantySlideVel: 0,
+  // Squeeze (left/right asymmetric)
+  squeezeL: 0, squeezeR: 0,
+  // Jiggle amplitude tracker
+  jiggleIntensity: 0,
+  // Hidden motion state
+  hiddenMotionActive: false,
+  hiddenMotionTimer: 0,
+  hiddenComboStreak: 0,
+  // Slap ripple
+  ripples: [],
+};
+
+const SPRING_K = 280;    // spring stiffness
+const SPRING_DAMP = 8;   // damping
+const ROT_SPRING = 200;
+const ROT_DAMP = 12;
+
+function bootyImpact(side, intensity, swipeDir) {
+  const force = intensity * 18;
+
+  if (side === 'left') {
+    booty.leftCheek.vx += (Math.random() - 0.3) * force;
+    booty.leftCheek.vy += -force * 0.6;
+    booty.rotVel += force * 0.8;
+    booty.squeezeL = 0.15 * intensity;
+  } else {
+    booty.rightCheek.vx += (Math.random() + 0.3) * force * -1;
+    booty.rightCheek.vy += -force * 0.6;
+    booty.rotVel -= force * 0.8;
+    booty.squeezeR = 0.15 * intensity;
+  }
+
+  // Scale bounce
+  booty.scaleVx += 0.08 * intensity;
+  booty.scaleVy -= 0.12 * intensity;
+
+  // Jiggle tracker
+  booty.jiggleIntensity = Math.min(1, booty.jiggleIntensity + 0.3 * intensity);
+
+  // Add ripple
+  const w = W(), h = H();
+  const cx = w / 2 + (side === 'left' ? -w * 0.1 : w * 0.1);
+  const cy = h * 0.48;
+  booty.ripples.push({ x: cx, y: cy, r: 10, maxR: 60 + intensity * 30, life: 1 });
+
+  // Swipe → panty slide
+  if (swipeDir === 'down') {
+    booty.pantySlideTarget = Math.min(1, booty.pantySlideTarget + 0.5);
+    booty.hiddenComboStreak++;
+  } else if (swipeDir === 'up') {
+    booty.pantySlideTarget = Math.max(0, booty.pantySlideTarget - 0.5);
+  } else if (swipeDir === 'left' || swipeDir === 'right') {
+    // Side swipe → horizontal wiggle
+    const dir = swipeDir === 'left' ? -1 : 1;
+    booty.leftCheek.vx += dir * force * 1.5;
+    booty.rightCheek.vx += dir * force * 1.5;
+  }
+
+  // Hidden motion: 5+ consecutive down-swipes
+  if (booty.hiddenComboStreak >= 5 && !booty.hiddenMotionActive) {
+    booty.hiddenMotionActive = true;
+    booty.hiddenMotionTimer = 3.0; // 3 seconds of fantastic motion
+    score += 1000; // bonus
+  }
+}
+
+function updateBooty(dt) {
+  // Spring physics for each cheek
+  const springUpdate = (cheek) => {
+    const ax = -SPRING_K * cheek.x - SPRING_DAMP * cheek.vx;
+    const ay = -SPRING_K * cheek.y - SPRING_DAMP * cheek.vy;
+    cheek.vx += ax * dt;
+    cheek.vy += ay * dt;
+    cheek.x += cheek.vx * dt;
+    cheek.y += cheek.vy * dt;
+  };
+  springUpdate(booty.leftCheek);
+  springUpdate(booty.rightCheek);
+
+  // Rotation spring
+  const rotAcc = -ROT_SPRING * booty.rotation - ROT_DAMP * booty.rotVel;
+  booty.rotVel += rotAcc * dt;
+  booty.rotation += booty.rotVel * dt;
+
+  // Scale spring back to 1
+  const sax = -200 * (booty.scaleX - 1) - 10 * booty.scaleVx;
+  const say = -200 * (booty.scaleY - 1) - 10 * booty.scaleVy;
+  booty.scaleVx += sax * dt;
+  booty.scaleVy += say * dt;
+  booty.scaleX += booty.scaleVx * dt;
+  booty.scaleY += booty.scaleVy * dt;
+
+  // Squeeze decay
+  booty.squeezeL *= Math.pow(0.02, dt);
+  booty.squeezeR *= Math.pow(0.02, dt);
+
+  // Panty slide spring toward target
+  const pDiff = booty.pantySlideTarget - booty.pantySlide;
+  booty.pantySlideVel += (pDiff * 80 - booty.pantySlideVel * 6) * dt;
+  booty.pantySlide += booty.pantySlideVel * dt;
+
+  // Panty slowly returns up over time
+  if (booty.pantySlideTarget > 0) {
+    booty.pantySlideTarget -= dt * 0.15;
+    if (booty.pantySlideTarget < 0) booty.pantySlideTarget = 0;
+  }
+
+  // Jiggle decay
+  booty.jiggleIntensity *= Math.pow(0.3, dt);
+
+  // Hidden motion update
+  if (booty.hiddenMotionActive) {
+    booty.hiddenMotionTimer -= dt;
+    // Fantastic auto-wobble
+    const t = songTime * 12;
+    booty.leftCheek.vx += Math.sin(t) * 200 * dt;
+    booty.leftCheek.vy += Math.cos(t * 1.3) * 150 * dt;
+    booty.rightCheek.vx += Math.sin(t + 2) * 200 * dt;
+    booty.rightCheek.vy += Math.cos(t * 1.3 + 1) * 150 * dt;
+    booty.rotVel += Math.sin(t * 0.7) * 80 * dt;
+    // Keep panty sliding
+    booty.pantySlideTarget = 0.7 + Math.sin(t * 0.5) * 0.2;
+
+    if (booty.hiddenMotionTimer <= 0) {
+      booty.hiddenMotionActive = false;
+      booty.hiddenComboStreak = 0;
+    }
+  }
+
+  // Reset hidden combo if not swiping down
+  // (reset handled in input)
+
+  // Ripple update
+  for (let i = booty.ripples.length - 1; i >= 0; i--) {
+    const r = booty.ripples[i];
+    r.r += dt * 120;
+    r.life -= dt * 2.5;
+    if (r.life <= 0) booty.ripples.splice(i, 1);
+  }
+
+  // Beat pulse (subtle idle bounce)
+  const beatPhase = (songTime % beatInterval) / beatInterval;
+  if (beatPhase < 0.1) {
+    booty.scaleVy -= 0.3 * dt;
+  }
+}
+
+function drawBooty() {
+  const w = W(), h = H();
+  const cx = w / 2;
+  const cy = h * 0.48;
+  // Scale based on screen
+  const baseSize = Math.min(w * 0.38, h * 0.28);
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(booty.rotation * 0.01);
+  ctx.scale(booty.scaleX, booty.scaleY);
+
+  const sl = booty.squeezeL;
+  const sr = booty.squeezeR;
+  const lx = booty.leftCheek.x;
+  const ly = booty.leftCheek.y;
+  const rx = booty.rightCheek.x;
+  const ry = booty.rightCheek.y;
+
+  // ─── Skin color with lighting ───
+  const skinBase = '#FFB89A';
+  const skinLight = '#FFD4BC';
+  const skinShadow = '#E8956E';
+
+  // ─── Thighs (behind cheeks) ───
+  ctx.save();
+  // Left thigh
+  ctx.beginPath();
+  ctx.moveTo(-baseSize * 0.7 + lx, baseSize * 0.3 + ly);
+  ctx.quadraticCurveTo(-baseSize * 0.85 + lx, baseSize * 0.9, -baseSize * 0.6 + lx, baseSize * 1.3 + ly);
+  ctx.lineTo(-baseSize * 0.1 + lx, baseSize * 1.2 + ly);
+  ctx.quadraticCurveTo(-baseSize * 0.15 + lx, baseSize * 0.7, -baseSize * 0.05, baseSize * 0.3);
+  ctx.closePath();
+  const thighGradL = ctx.createLinearGradient(-baseSize * 0.7, 0, -baseSize * 0.1, 0);
+  thighGradL.addColorStop(0, skinShadow);
+  thighGradL.addColorStop(0.5, skinBase);
+  thighGradL.addColorStop(1, skinShadow);
+  ctx.fillStyle = thighGradL;
+  ctx.fill();
+
+  // Right thigh
+  ctx.beginPath();
+  ctx.moveTo(baseSize * 0.7 + rx, baseSize * 0.3 + ry);
+  ctx.quadraticCurveTo(baseSize * 0.85 + rx, baseSize * 0.9, baseSize * 0.6 + rx, baseSize * 1.3 + ry);
+  ctx.lineTo(baseSize * 0.1 + rx, baseSize * 1.2 + ry);
+  ctx.quadraticCurveTo(baseSize * 0.15 + rx, baseSize * 0.7, baseSize * 0.05, baseSize * 0.3);
+  ctx.closePath();
+  const thighGradR = ctx.createLinearGradient(baseSize * 0.1, 0, baseSize * 0.7, 0);
+  thighGradR.addColorStop(0, skinShadow);
+  thighGradR.addColorStop(0.5, skinBase);
+  thighGradR.addColorStop(1, skinShadow);
+  ctx.fillStyle = thighGradR;
+  ctx.fill();
+  ctx.restore();
+
+  // ─── Left Cheek ───
+  ctx.save();
+  const lScale = 1 - sl * 0.3;
+  ctx.beginPath();
+  ctx.moveTo(0, -baseSize * 0.35);
+  ctx.bezierCurveTo(
+    -baseSize * (0.5 + sl * 0.2) + lx, -baseSize * 0.5 + ly,
+    -baseSize * (0.95 + sl * 0.1) + lx, -baseSize * 0.1 + ly,
+    -baseSize * 0.85 + lx, baseSize * 0.35 + ly
+  );
+  ctx.bezierCurveTo(
+    -baseSize * 0.7 + lx, baseSize * 0.65 + ly,
+    -baseSize * 0.2 + lx, baseSize * 0.55 + ly,
+    0, baseSize * 0.35
+  );
+  ctx.closePath();
+
+  const gradL = ctx.createRadialGradient(
+    -baseSize * 0.35 + lx, baseSize * 0.05 + ly, baseSize * 0.1,
+    -baseSize * 0.4 + lx, baseSize * 0.1 + ly, baseSize * 0.8
+  );
+  gradL.addColorStop(0, skinLight);
+  gradL.addColorStop(0.5, skinBase);
+  gradL.addColorStop(1, skinShadow);
+  ctx.fillStyle = gradL;
+  ctx.fill();
+
+  // Highlight
+  ctx.beginPath();
+  ctx.ellipse(-baseSize * 0.4 + lx, -baseSize * 0.05 + ly, baseSize * 0.2, baseSize * 0.15, -0.3, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.fill();
+  ctx.restore();
+
+  // ─── Right Cheek ───
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, -baseSize * 0.35);
+  ctx.bezierCurveTo(
+    baseSize * (0.5 + sr * 0.2) + rx, -baseSize * 0.5 + ry,
+    baseSize * (0.95 + sr * 0.1) + rx, -baseSize * 0.1 + ry,
+    baseSize * 0.85 + rx, baseSize * 0.35 + ry
+  );
+  ctx.bezierCurveTo(
+    baseSize * 0.7 + rx, baseSize * 0.65 + ry,
+    baseSize * 0.2 + rx, baseSize * 0.55 + ry,
+    0, baseSize * 0.35
+  );
+  ctx.closePath();
+
+  const gradR = ctx.createRadialGradient(
+    baseSize * 0.35 + rx, baseSize * 0.05 + ry, baseSize * 0.1,
+    baseSize * 0.4 + rx, baseSize * 0.1 + ry, baseSize * 0.8
+  );
+  gradR.addColorStop(0, skinLight);
+  gradR.addColorStop(0.5, skinBase);
+  gradR.addColorStop(1, skinShadow);
+  ctx.fillStyle = gradR;
+  ctx.fill();
+
+  // Highlight
+  ctx.beginPath();
+  ctx.ellipse(baseSize * 0.4 + rx, -baseSize * 0.05 + ry, baseSize * 0.2, baseSize * 0.15, 0.3, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.fill();
+  ctx.restore();
+
+  // ─── Center crease (shadow line) ───
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, -baseSize * 0.3);
+  ctx.quadraticCurveTo(
+    (lx + rx) * 0.5 - 2, baseSize * 0.1,
+    0, baseSize * 0.4
+  );
+  ctx.strokeStyle = 'rgba(180, 100, 60, 0.35)';
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+  ctx.restore();
+
+  // ─── Panty ───
+  const ps = booty.pantySlide; // 0..1
+  const pantyY = -baseSize * 0.4 + ps * baseSize * 0.55; // slide down
+
+  ctx.save();
+  // Panty body (bikini/underwear shape)
+  const pantyColor1 = '#4dd0e1';
+  const pantyColor2 = '#00897b';
+  const pantyEdge = '#80deea';
+
+  ctx.beginPath();
+  // Top edge of panty
+  const topY = pantyY;
+  const botY = pantyY + baseSize * 0.5;
+
+  // Waistband
+  ctx.moveTo(-baseSize * 0.75 + lx * (1 - ps), topY + ly * 0.3);
+  ctx.quadraticCurveTo(0, topY - baseSize * 0.08, baseSize * 0.75 + rx * (1 - ps), topY + ry * 0.3);
+
+  // Right side down
+  ctx.quadraticCurveTo(
+    baseSize * 0.8 + rx * 0.5, topY + baseSize * 0.25,
+    baseSize * 0.45 + rx * 0.3, botY + ry * 0.2
+  );
+
+  // Bottom (V shape)
+  ctx.quadraticCurveTo(
+    baseSize * 0.15, botY + baseSize * 0.12,
+    0, botY + baseSize * 0.05
+  );
+  ctx.quadraticCurveTo(
+    -baseSize * 0.15, botY + baseSize * 0.12,
+    -baseSize * 0.45 + lx * 0.3, botY + ly * 0.2
+  );
+
+  // Left side up
+  ctx.quadraticCurveTo(
+    -baseSize * 0.8 + lx * 0.5, topY + baseSize * 0.25,
+    -baseSize * 0.75 + lx * (1 - ps), topY + ly * 0.3
+  );
+  ctx.closePath();
+
+  const pantyGrad = ctx.createLinearGradient(0, topY, 0, botY);
+  pantyGrad.addColorStop(0, pantyColor1);
+  pantyGrad.addColorStop(1, pantyColor2);
+  ctx.fillStyle = pantyGrad;
+  ctx.fill();
+
+  // Waistband stripe
+  ctx.beginPath();
+  ctx.moveTo(-baseSize * 0.76 + lx * (1 - ps), topY + ly * 0.3);
+  ctx.quadraticCurveTo(0, topY - baseSize * 0.09, baseSize * 0.76 + rx * (1 - ps), topY + ry * 0.3);
+  ctx.strokeStyle = pantyEdge;
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  // Little bow/ribbon at center top
+  if (ps < 0.6) {
+    const bowY = topY - 1;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.ellipse(-5, bowY, 5, 3, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(5, bowY, 5, 3, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, bowY, 2, 0, Math.PI * 2);
+    ctx.fillStyle = pantyColor1;
+    ctx.fill();
+  }
+
+  // Lace edge pattern at bottom
+  const laceY = botY;
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = -4; i <= 4; i++) {
+    const lx2 = i * baseSize * 0.08;
+    const scallop = Math.abs(i) < 4 ? 4 : 2;
+    ctx.moveTo(lx2 - baseSize * 0.04, laceY + ry * 0.1);
+    ctx.quadraticCurveTo(lx2, laceY + scallop + ry * 0.1, lx2 + baseSize * 0.04, laceY + ry * 0.1);
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  // ─── Hidden motion sparkles ───
+  if (booty.hiddenMotionActive) {
+    ctx.save();
+    const t = songTime * 6;
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2 + t;
+      const dist = baseSize * 0.9 + Math.sin(t * 2 + i) * 15;
+      const sx = Math.cos(angle) * dist;
+      const sy = Math.sin(angle) * dist * 0.6;
+      const sparkSize = 3 + Math.sin(t * 3 + i * 2) * 2;
+
+      ctx.fillStyle = i % 2 === 0 ? '#ff6ec7' : '#ffaa00';
+      ctx.globalAlpha = 0.6 + Math.sin(t * 4 + i) * 0.4;
+
+      // Star shape
+      ctx.beginPath();
+      for (let j = 0; j < 5; j++) {
+        const a = (j / 5) * Math.PI * 2 - Math.PI / 2 + t;
+        const r1 = sparkSize;
+        const r2 = sparkSize * 0.4;
+        ctx.lineTo(sx + Math.cos(a) * r1, sy + Math.sin(a) * r1);
+        const a2 = a + Math.PI / 5;
+        ctx.lineTo(sx + Math.cos(a2) * r2, sy + Math.sin(a2) * r2);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // "FANTASTIC!" text
+    ctx.globalAlpha = 0.7 + Math.sin(songTime * 10) * 0.3;
+    ctx.font = '900 ' + (baseSize * 0.22) + 'px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ff6ec7';
+    ctx.shadowColor = '#ff6ec7';
+    ctx.shadowBlur = 20;
+    ctx.fillText('FANTASTIC!', 0, -baseSize * 0.7);
+    ctx.restore();
+  }
+
+  ctx.restore(); // main transform
+
+  // ─── Ripples (drawn in screen space) ───
+  for (const rip of booty.ripples) {
+    ctx.save();
+    ctx.globalAlpha = rip.life * 0.4;
+    ctx.strokeStyle = '#ff6ec7';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(rip.x, rip.y, rip.r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
 
 // ─── Difficulty Settings ───
 const DIFFICULTIES = {
@@ -445,24 +877,21 @@ function generateChart(diff) {
   const interval = 60 / cfg.bpm;
   const totalBeats = Math.floor(cfg.duration / interval);
 
-  // Patterns for musical feel
   for (let b = 4; b < totalBeats - 2; b++) {
     const t = b * interval;
     const rand = Math.random();
 
     if (rand < cfg.noteDensity) {
-      // Single note
       const lane = Math.floor(Math.random() * LANE_COUNT);
       const typeRand = Math.random();
       let type = 'tap';
-      if (typeRand > 0.75) {
+      if (typeRand > 0.7) {
         const swipes = ['swipe_up', 'swipe_down', 'swipe_left', 'swipe_right'];
         type = swipes[Math.floor(Math.random() * swipes.length)];
       }
       chart.push({ time: t, lane, type });
     }
 
-    // Occasional doubles
     if (rand > 0.7 && rand < 0.7 + cfg.noteDensity * 0.2) {
       const l1 = Math.floor(Math.random() * 2);
       const l2 = 2 + Math.floor(Math.random() * 2);
@@ -470,7 +899,6 @@ function generateChart(diff) {
       chart.push({ time: t, lane: l2, type: 'tap' });
     }
 
-    // Offbeat notes for harder difficulties
     if (cfg.noteDensity > 0.5 && Math.random() < cfg.noteDensity * 0.3) {
       const offT = t + interval / 2;
       const lane = Math.floor(Math.random() * LANE_COUNT);
@@ -503,15 +931,24 @@ function startGame(diff) {
     hit: false,
   }));
 
-  score = 0;
-  combo = 0;
-  maxCombo = 0;
+  score = 0; combo = 0; maxCombo = 0;
   judgments = { perfect: 0, great: 0, good: 0, miss: 0 };
-  fever = 0;
-  feverActive = false;
+  fever = 0; feverActive = false;
   particles = [];
-  songTime = 0;
-  lastBeatScheduled = -1;
+  songTime = 0; lastBeatScheduled = -1;
+
+  // Reset booty
+  booty.leftCheek = { x: 0, y: 0, vx: 0, vy: 0 };
+  booty.rightCheek = { x: 0, y: 0, vx: 0, vy: 0 };
+  booty.rotation = 0; booty.rotVel = 0;
+  booty.scaleX = 1; booty.scaleY = 1;
+  booty.scaleVx = 0; booty.scaleVy = 0;
+  booty.pantySlide = 0; booty.pantySlideTarget = 0; booty.pantySlideVel = 0;
+  booty.squeezeL = 0; booty.squeezeR = 0;
+  booty.jiggleIntensity = 0;
+  booty.hiddenMotionActive = false; booty.hiddenMotionTimer = 0;
+  booty.hiddenComboStreak = 0;
+  booty.ripples = [];
 
   document.getElementById('startScreen').style.display = 'none';
   document.getElementById('hud').classList.add('active');
@@ -538,20 +975,17 @@ function gameLoop(timestamp) {
   const beatNum = Math.floor(songTime / beatInterval);
   if (beatNum > lastBeatScheduled && audioCtx) {
     lastBeatScheduled = beatNum;
-    const nextBeatTime = audioCtx.currentTime + 0.01;
-    playBGBeat(nextBeatTime);
+    playBGBeat(audioCtx.currentTime + 0.01);
   }
 
   // Update notes
   const hitY = H() * HIT_Y_RATIO;
-  const approachTime = hitY / noteSpeed;
 
   for (const note of notes) {
     if (!note.active) continue;
     const timeDiff = note.time - songTime;
     note.y = hitY - timeDiff * noteSpeed;
 
-    // Miss detection
     if (timeDiff < -0.2 && !note.hit) {
       note.active = false;
       note.hit = true;
@@ -569,6 +1003,9 @@ function gameLoop(timestamp) {
     if (p.life <= 0) particles.splice(i, 1);
   }
 
+  // Update booty physics
+  updateBooty(dt);
+
   // Fever timer
   if (feverActive) {
     feverTimer -= dt;
@@ -578,12 +1015,8 @@ function gameLoop(timestamp) {
     }
   }
 
-  // Judgment fade
-  if (judgmentOpacity > 0) {
-    judgmentOpacity -= dt * 3;
-  }
+  if (judgmentOpacity > 0) judgmentOpacity -= dt * 3;
 
-  // Check song end
   if (songTime >= songDuration + 1) {
     endGame();
     return;
@@ -599,61 +1032,75 @@ function draw() {
   const w = W(), h = H();
   ctx.clearRect(0, 0, w, h);
 
-  // Background gradient
+  // Background — beach/summer vibe
   const bg = ctx.createLinearGradient(0, 0, 0, h);
-  bg.addColorStop(0, '#0a0a2e');
-  bg.addColorStop(0.5, '#15103a');
+  bg.addColorStop(0, '#87CEEB');   // sky blue
+  bg.addColorStop(0.3, '#B0E0E6');
+  bg.addColorStop(0.5, '#E0F7FA');
+  bg.addColorStop(0.7, '#0a0a2e');
   bg.addColorStop(1, '#0a0a1a');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, w, h);
 
-  // Lane lines
+  // Palm tree silhouettes (simple)
+  drawPalm(w * 0.08, h * 0.15, 0.6);
+  drawPalm(w * 0.92, h * 0.12, -0.5);
+
+  // ─── Draw character ───
+  drawBooty();
+
+  // ─── Lane overlay (semi-transparent over bottom) ───
   const laneW = w / LANE_COUNT;
-  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  const noteZoneTop = h * 0.68;
+
+  // Dark overlay for note zone
+  ctx.fillStyle = 'rgba(10, 10, 30, 0.7)';
+  ctx.fillRect(0, noteZoneTop, w, h - noteZoneTop);
+
+  // Lane lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
   ctx.lineWidth = 1;
   for (let i = 1; i < LANE_COUNT; i++) {
     ctx.beginPath();
-    ctx.moveTo(i * laneW, 0);
+    ctx.moveTo(i * laneW, noteZoneTop);
     ctx.lineTo(i * laneW, h);
     ctx.stroke();
   }
 
-  // Center divider (left side / right side)
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  // Center divider
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(w / 2, 0);
+  ctx.moveTo(w / 2, noteZoneTop);
   ctx.lineTo(w / 2, h);
   ctx.stroke();
 
   // Hit line
   const hitY = h * HIT_Y_RATIO;
-  const hitGrad = ctx.createLinearGradient(0, hitY - 2, 0, hitY + 2);
+  const hitGrad = ctx.createLinearGradient(0, hitY - 3, 0, hitY + 3);
   hitGrad.addColorStop(0, 'rgba(255,255,255,0)');
-  hitGrad.addColorStop(0.5, 'rgba(255,255,255,0.3)');
+  hitGrad.addColorStop(0.5, 'rgba(255,255,255,0.4)');
   hitGrad.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = hitGrad;
-  ctx.fillRect(0, hitY - 2, w, 4);
+  ctx.fillRect(0, hitY - 3, w, 6);
 
   // Hit zone circles
   for (let i = 0; i < LANE_COUNT; i++) {
     const cx = (i + 0.5) * laneW;
     ctx.beginPath();
-    ctx.arc(cx, hitY, 32, 0, Math.PI * 2);
-    ctx.strokeStyle = LANE_COLORS[i] + '40';
-    ctx.lineWidth = 2;
+    ctx.arc(cx, hitY, 30, 0, Math.PI * 2);
+    ctx.strokeStyle = LANE_COLORS[i] + '50';
+    ctx.lineWidth = 2.5;
     ctx.stroke();
-
-    // Inner glow
     ctx.beginPath();
-    ctx.arc(cx, hitY, 28, 0, Math.PI * 2);
-    ctx.fillStyle = LANE_COLORS[i] + '10';
+    ctx.arc(cx, hitY, 26, 0, Math.PI * 2);
+    ctx.fillStyle = LANE_COLORS[i] + '15';
     ctx.fill();
   }
 
-  // Notes
+  // Notes (only draw in note zone)
   for (const note of notes) {
-    if (!note.active || note.y < -60 || note.y > h + 30) continue;
+    if (!note.active || note.y < noteZoneTop - 40 || note.y > h + 30) continue;
     drawNote(note, laneW, hitY);
   }
 
@@ -671,20 +1118,20 @@ function draw() {
   if (judgmentOpacity > 0) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, judgmentOpacity);
-    ctx.font = '900 38px system-ui, sans-serif';
+    ctx.font = '900 42px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = judgmentColor;
     ctx.shadowColor = judgmentColor;
-    ctx.shadowBlur = 20;
-    ctx.fillText(judgmentText, w / 2, h * 0.38);
+    ctx.shadowBlur = 25;
+    ctx.fillText(judgmentText, w / 2, h * 0.22);
     ctx.restore();
   }
 
   // Fever overlay
   if (feverActive) {
     ctx.save();
-    ctx.globalAlpha = 0.04 + Math.sin(songTime * 8) * 0.02;
-    const feverGrad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w);
+    ctx.globalAlpha = 0.06 + Math.sin(songTime * 8) * 0.03;
+    const feverGrad = ctx.createRadialGradient(w/2, h*0.45, 0, w/2, h*0.45, w * 0.8);
     feverGrad.addColorStop(0, '#ff6ec7');
     feverGrad.addColorStop(1, 'transparent');
     ctx.fillStyle = feverGrad;
@@ -692,7 +1139,7 @@ function draw() {
     ctx.restore();
   }
 
-  // Progress bar at bottom
+  // Progress bar
   const progress = Math.min(1, songTime / songDuration);
   ctx.fillStyle = 'rgba(255,255,255,0.1)';
   ctx.fillRect(0, h - 3, w, 3);
@@ -703,61 +1150,82 @@ function draw() {
   ctx.fillRect(0, h - 3, w * progress, 3);
 }
 
+function drawPalm(x, y, lean) {
+  ctx.save();
+  ctx.translate(x, y);
+  // Trunk
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.moveTo(0, 80);
+  ctx.quadraticCurveTo(lean * 30, 40, lean * 15, 0);
+  ctx.stroke();
+  // Leaves
+  ctx.fillStyle = 'rgba(34,139,34,0.2)';
+  for (let i = 0; i < 5; i++) {
+    const angle = (i / 5) * Math.PI * 1.5 - Math.PI * 0.75 + lean * 0.3;
+    ctx.beginPath();
+    ctx.moveTo(lean * 15, 0);
+    ctx.quadraticCurveTo(
+      lean * 15 + Math.cos(angle) * 40, Math.sin(angle) * 40 - 20,
+      lean * 15 + Math.cos(angle) * 70, Math.sin(angle) * 25 + 5
+    );
+    ctx.quadraticCurveTo(
+      lean * 15 + Math.cos(angle) * 35, Math.sin(angle) * 20 - 5,
+      lean * 15, 0
+    );
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function drawNote(note, laneW, hitY) {
   const cx = (note.lane + 0.5) * laneW;
   const cy = note.y;
   const color = LANE_COLORS[note.lane];
 
   if (note.type === 'tap') {
-    // Glow
     ctx.save();
     ctx.shadowColor = color;
     ctx.shadowBlur = 15;
-
-    // Circle note
     ctx.beginPath();
-    ctx.arc(cx, cy, 24, 0, Math.PI * 2);
-    const g = ctx.createRadialGradient(cx, cy - 5, 2, cx, cy, 24);
+    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+    const g = ctx.createRadialGradient(cx, cy - 4, 2, cx, cy, 22);
     g.addColorStop(0, '#fff');
     g.addColorStop(0.4, color);
     g.addColorStop(1, color + '80');
     ctx.fillStyle = g;
     ctx.fill();
-
-    // Border
     ctx.beginPath();
-    ctx.arc(cx, cy, 24, 0, Math.PI * 2);
-    ctx.strokeStyle = '#fff8';
+    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+    ctx.strokeStyle = '#fff6';
     ctx.lineWidth = 1.5;
     ctx.stroke();
     ctx.restore();
   } else {
-    // Swipe note — diamond shape with arrow
     ctx.save();
     ctx.shadowColor = color;
     ctx.shadowBlur = 15;
-
     ctx.translate(cx, cy);
     ctx.rotate(Math.PI / 4);
-    const size = 20;
+    const size = 18;
     ctx.beginPath();
     ctx.rect(-size, -size, size * 2, size * 2);
-    const g = ctx.createRadialGradient(0, -3, 1, 0, 0, size);
+    const g = ctx.createRadialGradient(0, -2, 1, 0, 0, size);
     g.addColorStop(0, '#fff');
     g.addColorStop(0.5, color);
     g.addColorStop(1, color + '60');
     ctx.fillStyle = g;
     ctx.fill();
-    ctx.strokeStyle = '#fff8';
+    ctx.strokeStyle = '#fff6';
     ctx.lineWidth = 1.5;
     ctx.stroke();
     ctx.restore();
 
-    // Arrow indicator
     ctx.save();
     ctx.translate(cx, cy);
     ctx.fillStyle = '#fff';
-    ctx.font = '700 16px system-ui';
+    ctx.font = '700 14px system-ui';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const arrows = { swipe_up: '↑', swipe_down: '↓', swipe_left: '←', swipe_right: '→' };
@@ -789,6 +1257,8 @@ function registerJudgment(type, note) {
   if (type === 'miss') {
     combo = 0;
     fever = Math.max(0, fever - 10);
+    booty.hiddenComboStreak = 0;
+    playHitSound('miss');
   } else {
     combo++;
     if (combo > maxCombo) maxCombo = combo;
@@ -804,8 +1274,12 @@ function registerJudgment(type, note) {
 
     playHitSound(type);
     spawnParticles(note);
+
+    // Booty impact!
+    const side = note.lane < 2 ? 'left' : 'right';
+    const intensity = type === 'perfect' ? 1.2 : type === 'great' ? 0.8 : 0.5;
+    bootyImpact(side, intensity, null);
   }
-  if (type === 'miss') playHitSound('miss');
 }
 
 function spawnParticles(note) {
@@ -836,7 +1310,6 @@ function getLane(x) {
 }
 
 function tryHitNote(lane, swipeDir) {
-  const hitY = H() * HIT_Y_RATIO;
   let best = null;
   let bestDiff = Infinity;
 
@@ -844,19 +1317,16 @@ function tryHitNote(lane, swipeDir) {
     if (!note.active || note.hit || note.lane !== lane) continue;
     const timeDiff = Math.abs(note.time - songTime);
     if (timeDiff < bestDiff && timeDiff < 0.3) {
-      // Check type matching for swipe notes
       if (note.type !== 'tap' && swipeDir) {
         if (note.type !== 'swipe_' + swipeDir) continue;
       }
       if (note.type !== 'tap' && !swipeDir) continue;
-      if (note.type === 'tap' && swipeDir) continue; // swipe on tap = still allow
-
+      if (note.type === 'tap' && swipeDir) continue;
       bestDiff = timeDiff;
       best = note;
     }
   }
 
-  // Also try: allow tap on any note type as fallback
   if (!best && !swipeDir) {
     for (const note of notes) {
       if (!note.active || note.hit || note.lane !== lane) continue;
@@ -874,6 +1344,12 @@ function tryHitNote(lane, swipeDir) {
     if (bestDiff < 0.05) registerJudgment('perfect', best);
     else if (bestDiff < 0.1) registerJudgment('great', best);
     else registerJudgment('good', best);
+
+    // Additional booty impact for swipes
+    if (swipeDir) {
+      const side = best.lane < 2 ? 'left' : 'right';
+      bootyImpact(side, 1.5, swipeDir);
+    }
   }
 }
 
@@ -887,7 +1363,6 @@ canvas.addEventListener('touchstart', e => {
       lane: getLane(touch.clientX),
       time: performance.now(),
     };
-    // Immediate tap hit
     tryHitNote(getLane(touch.clientX), null);
   }
 }, { passive: false });
@@ -919,7 +1394,7 @@ canvas.addEventListener('touchend', e => {
   }
 }, { passive: false });
 
-// Mouse fallback for desktop testing
+// Mouse fallback
 let mouseDown = false;
 let mouseStart = { x: 0, y: 0 };
 
@@ -948,12 +1423,21 @@ canvas.addEventListener('mouseup', e => {
   }
 });
 
-// Keyboard fallback (D, F, J, K)
+// Keyboard (D, F, J, K for tap; arrow keys for swipe test)
 const KEY_MAP = { d: 0, f: 1, j: 2, k: 3 };
+let lastKeyLane = 1;
 document.addEventListener('keydown', e => {
   if (gameState !== 'playing') return;
   const lane = KEY_MAP[e.key.toLowerCase()];
-  if (lane !== undefined) tryHitNote(lane, null);
+  if (lane !== undefined) {
+    tryHitNote(lane, null);
+    lastKeyLane = lane;
+  }
+  // Arrow keys trigger swipe on last lane
+  const arrowMap = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+  if (arrowMap[e.key]) {
+    tryHitNote(lastKeyLane, arrowMap[e.key]);
+  }
 });
 
 // ─── Pause ───

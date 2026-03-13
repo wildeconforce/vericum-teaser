@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>리듬게임 데모 — Touch & Swipe</title>
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #0a0a1a;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+#app {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+
+/* ─── Start Screen ─── */
+#startScreen {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #0a0a2e 0%, #1a0a3e 50%, #0a0a1a 100%);
+  z-index: 100;
+  gap: 24px;
+}
+
+#startScreen h1 {
+  font-size: 42px; font-weight: 800;
+  background: linear-gradient(135deg, #ff6ec7, #7c4dff, #00e5ff);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: none;
+  letter-spacing: -1px;
+}
+
+#startScreen .subtitle {
+  color: rgba(255,255,255,0.5);
+  font-size: 14px;
+  margin-top: -12px;
+}
+
+.diff-btn {
+  width: 220px; padding: 16px;
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 16px;
+  background: rgba(255,255,255,0.05);
+  color: #fff; font-size: 18px; font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.diff-btn:hover, .diff-btn:active {
+  background: rgba(124,77,255,0.3);
+  border-color: #7c4dff;
+  transform: scale(1.03);
+}
+
+.diff-btn .diff-desc {
+  font-size: 12px; font-weight: 400;
+  color: rgba(255,255,255,0.4);
+  margin-top: 4px;
+}
+
+/* ─── Game Canvas ─── */
+#gameCanvas {
+  display: block;
+  width: 100%; height: 100%;
+  position: absolute; inset: 0;
+}
+
+/* ─── HUD ─── */
+#hud {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: none;
+  padding: 12px 20px;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+  pointer-events: none;
+}
+
+#hud.active { display: flex; }
+
+.hud-score {
+  font-size: 28px; font-weight: 800;
+  color: #fff;
+  text-shadow: 0 0 20px rgba(124,77,255,0.6);
+}
+
+.hud-combo {
+  font-size: 20px; font-weight: 700;
+  color: #00e5ff;
+  text-shadow: 0 0 15px rgba(0,229,255,0.5);
+}
+
+.hud-right {
+  display: flex; gap: 16px; align-items: center;
+}
+
+/* ─── Judgment Display ─── */
+#judgment {
+  position: absolute;
+  top: 38%;
+  left: 50%; transform: translateX(-50%);
+  font-size: 36px; font-weight: 900;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 0.1s;
+  text-shadow: 0 0 30px currentColor;
+}
+
+/* ─── Result Screen ─── */
+#resultScreen {
+  position: absolute; inset: 0;
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(10,10,26,0.95);
+  z-index: 100; gap: 16px;
+}
+
+#resultScreen.active { display: flex; }
+
+#resultScreen h2 {
+  font-size: 36px; font-weight: 800;
+  background: linear-gradient(135deg, #ff6ec7, #7c4dff);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.result-stats {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 12px; width: 260px;
+}
+
+.result-stat {
+  background: rgba(255,255,255,0.05);
+  border-radius: 12px; padding: 12px;
+  text-align: center;
+}
+
+.result-stat .label {
+  font-size: 11px; color: rgba(255,255,255,0.4);
+  text-transform: uppercase; letter-spacing: 1px;
+}
+
+.result-stat .value {
+  font-size: 28px; font-weight: 800; color: #fff;
+  margin-top: 4px;
+}
+
+.result-stat .value.perfect { color: #ff6ec7; }
+.result-stat .value.great { color: #7c4dff; }
+.result-stat .value.good { color: #00e5ff; }
+.result-stat .value.miss { color: #ff4444; }
+
+#retryBtn {
+  margin-top: 12px;
+  padding: 14px 48px;
+  border-radius: 50px;
+  border: none;
+  background: linear-gradient(135deg, #7c4dff, #ff6ec7);
+  color: #fff; font-size: 18px; font-weight: 700;
+  cursor: pointer;
+}
+
+/* ─── Fever ─── */
+#feverGauge {
+  position: absolute; right: 16px; top: 60px;
+  width: 8px; height: 120px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+  z-index: 10; overflow: hidden;
+  pointer-events: none;
+}
+
+#feverFill {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 0%;
+  background: linear-gradient(0deg, #ff6ec7, #ffaa00);
+  border-radius: 4px;
+  transition: height 0.3s;
+}
+
+#feverLabel {
+  position: absolute; right: 12px; top: 186px;
+  font-size: 10px; font-weight: 800;
+  color: #ff6ec7; letter-spacing: 2px;
+  z-index: 10; pointer-events: none;
+  opacity: 0;
+}
+
+#feverLabel.active {
+  opacity: 1;
+  animation: feverPulse 0.5s ease infinite alternate;
+}
+
+@keyframes feverPulse {
+  from { transform: scale(1); opacity: 0.8; }
+  to { transform: scale(1.15); opacity: 1; }
+}
+
+/* ─── Pause ─── */
+#pauseBtn {
+  position: absolute; top: 12px; right: 16px;
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.2);
+  background: rgba(0,0,0,0.4);
+  color: #fff; font-size: 18px;
+  display: none; align-items: center; justify-content: center;
+  cursor: pointer; z-index: 30;
+}
+
+#pauseBtn.active { display: flex; }
+
+#pauseOverlay {
+  position: absolute; inset: 0;
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(10,10,26,0.9);
+  z-index: 50; gap: 20px;
+}
+
+#pauseOverlay.active { display: flex; }
+
+#pauseOverlay h2 { color: #fff; font-size: 32px; }
+
+.pause-btn {
+  width: 200px; padding: 14px;
+  border-radius: 12px; border: 2px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.05);
+  color: #fff; font-size: 16px; font-weight: 600;
+  cursor: pointer; text-align: center;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- Start Screen -->
+  <div id="startScreen">
+    <h1>RHYTHM TOUCH</h1>
+    <p class="subtitle">터치 & 스와이프 리듬게임</p>
+    <button class="diff-btn" onclick="startGame('easy')">
+      EASY
+      <div class="diff-desc">느린 속도 · 입문용</div>
+    </button>
+    <button class="diff-btn" onclick="startGame('normal')">
+      NORMAL
+      <div class="diff-desc">보통 속도 · 추천</div>
+    </button>
+    <button class="diff-btn" onclick="startGame('hard')">
+      HARD
+      <div class="diff-desc">빠른 속도 · 도전!</div>
+    </button>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div>
+      <div class="hud-score" id="scoreDisplay">0</div>
+    </div>
+    <div class="hud-right">
+      <div class="hud-combo" id="comboDisplay"></div>
+    </div>
+  </div>
+
+  <!-- Judgment -->
+  <div id="judgment"></div>
+
+  <!-- Fever -->
+  <div id="feverGauge"><div id="feverFill"></div></div>
+  <div id="feverLabel">FEVER</div>
+
+  <!-- Pause -->
+  <button id="pauseBtn" onclick="togglePause()">⏸</button>
+  <div id="pauseOverlay">
+    <h2>PAUSED</h2>
+    <button class="pause-btn" onclick="togglePause()">계속하기</button>
+    <button class="pause-btn" onclick="quitToMenu()">메뉴로</button>
+  </div>
+
+  <!-- Result -->
+  <div id="resultScreen">
+    <h2>RESULT</h2>
+    <div class="hud-score" id="finalScore">0</div>
+    <div style="color:rgba(255,255,255,0.5);font-size:13px;margin-top:-8px" id="maxComboDisplay"></div>
+    <div class="result-stats">
+      <div class="result-stat"><div class="label">Perfect</div><div class="value perfect" id="rPerfect">0</div></div>
+      <div class="result-stat"><div class="label">Great</div><div class="value great" id="rGreat">0</div></div>
+      <div class="result-stat"><div class="label">Good</div><div class="value good" id="rGood">0</div></div>
+      <div class="result-stat"><div class="label">Miss</div><div class="value miss" id="rMiss">0</div></div>
+    </div>
+    <button id="retryBtn" onclick="quitToMenu()">다시하기</button>
+  </div>
+</div>
+
+<script>
+// ─── Audio Context & Sound Synthesis ───
+let audioCtx = null;
+
+function initAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playHitSound(type) {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+
+  if (type === 'perfect') {
+    osc.frequency.setValueAtTime(880, now);
+    osc.frequency.exponentialRampToValueAtTime(1200, now + 0.05);
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc.type = 'sine';
+  } else if (type === 'great') {
+    osc.frequency.setValueAtTime(660, now);
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    osc.type = 'sine';
+  } else if (type === 'good') {
+    osc.frequency.setValueAtTime(440, now);
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    osc.type = 'triangle';
+  } else {
+    osc.frequency.setValueAtTime(150, now);
+    gain.gain.setValueAtTime(0.1, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    osc.type = 'sawtooth';
+  }
+
+  osc.start(now);
+  osc.stop(now + 0.2);
+}
+
+function playBGBeat(time) {
+  if (!audioCtx) return;
+  // Kick
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.frequency.setValueAtTime(150, time);
+  osc.frequency.exponentialRampToValueAtTime(30, time + 0.1);
+  gain.gain.setValueAtTime(0.2, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
+  osc.start(time); osc.stop(time + 0.15);
+
+  // Hi-hat on offbeats
+  const buf = audioCtx.createBufferSource();
+  const noiseBuf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.03, audioCtx.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  buf.buffer = noiseBuf;
+  const hg = audioCtx.createGain();
+  buf.connect(hg); hg.connect(audioCtx.destination);
+  const ht = time + beatInterval / 2;
+  hg.gain.setValueAtTime(0.06, ht);
+  hg.gain.exponentialRampToValueAtTime(0.001, ht + 0.05);
+  buf.start(ht); buf.stop(ht + 0.05);
+}
+
+// ─── Canvas Setup ───
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth * devicePixelRatio;
+  canvas.height = window.innerHeight * devicePixelRatio;
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+const W = () => window.innerWidth;
+const H = () => window.innerHeight;
+
+// ─── Game State ───
+let gameState = 'menu'; // menu, playing, paused, result
+let notes = [];
+let particles = [];
+let score = 0;
+let combo = 0;
+let maxCombo = 0;
+let judgments = { perfect: 0, great: 0, good: 0, miss: 0 };
+let fever = 0;
+let feverActive = false;
+let feverTimer = 0;
+let difficulty = 'normal';
+let noteSpeed = 320;
+let beatInterval = 0.5; // seconds per beat (120 BPM)
+let bpm = 128;
+let songTime = 0;
+let lastBeatScheduled = -1;
+let songDuration = 45; // seconds
+let songStartTime = 0;
+let lastFrameTime = 0;
+let judgmentText = '';
+let judgmentColor = '';
+let judgmentOpacity = 0;
+
+// Lane config: 4 lanes
+// Left side: 2 lanes, Right side: 2 lanes
+const LANE_COUNT = 4;
+const HIT_Y_RATIO = 0.82;
+
+const LANE_COLORS = [
+  '#ff6ec7', // pink
+  '#7c4dff', // purple
+  '#00e5ff', // cyan
+  '#ffaa00', // orange
+];
+
+const NOTE_TYPES = ['tap', 'tap', 'tap', 'swipe_up', 'swipe_down', 'swipe_left', 'swipe_right'];
+
+// ─── Difficulty Settings ───
+const DIFFICULTIES = {
+  easy:   { speed: 240, bpm: 100, noteDensity: 0.4, duration: 40 },
+  normal: { speed: 340, bpm: 128, noteDensity: 0.6, duration: 45 },
+  hard:   { speed: 440, bpm: 150, noteDensity: 0.85, duration: 50 },
+};
+
+// ─── Note Chart Generator ───
+function generateChart(diff) {
+  const cfg = DIFFICULTIES[diff];
+  const chart = [];
+  const interval = 60 / cfg.bpm;
+  const totalBeats = Math.floor(cfg.duration / interval);
+
+  // Patterns for musical feel
+  for (let b = 4; b < totalBeats - 2; b++) {
+    const t = b * interval;
+    const rand = Math.random();
+
+    if (rand < cfg.noteDensity) {
+      // Single note
+      const lane = Math.floor(Math.random() * LANE_COUNT);
+      const typeRand = Math.random();
+      let type = 'tap';
+      if (typeRand > 0.75) {
+        const swipes = ['swipe_up', 'swipe_down', 'swipe_left', 'swipe_right'];
+        type = swipes[Math.floor(Math.random() * swipes.length)];
+      }
+      chart.push({ time: t, lane, type });
+    }
+
+    // Occasional doubles
+    if (rand > 0.7 && rand < 0.7 + cfg.noteDensity * 0.2) {
+      const l1 = Math.floor(Math.random() * 2);
+      const l2 = 2 + Math.floor(Math.random() * 2);
+      chart.push({ time: t, lane: l1, type: 'tap' });
+      chart.push({ time: t, lane: l2, type: 'tap' });
+    }
+
+    // Offbeat notes for harder difficulties
+    if (cfg.noteDensity > 0.5 && Math.random() < cfg.noteDensity * 0.3) {
+      const offT = t + interval / 2;
+      const lane = Math.floor(Math.random() * LANE_COUNT);
+      chart.push({ time: offT, lane, type: 'tap' });
+    }
+  }
+
+  chart.sort((a, b) => a.time - b.time);
+  return chart;
+}
+
+// ─── Start Game ───
+function startGame(diff) {
+  initAudio();
+  difficulty = diff;
+  const cfg = DIFFICULTIES[diff];
+  noteSpeed = cfg.speed;
+  bpm = cfg.bpm;
+  beatInterval = 60 / bpm;
+  songDuration = cfg.duration;
+
+  const chart = generateChart(diff);
+
+  notes = chart.map(n => ({
+    time: n.time,
+    lane: n.lane,
+    type: n.type,
+    y: 0,
+    active: true,
+    hit: false,
+  }));
+
+  score = 0;
+  combo = 0;
+  maxCombo = 0;
+  judgments = { perfect: 0, great: 0, good: 0, miss: 0 };
+  fever = 0;
+  feverActive = false;
+  particles = [];
+  songTime = 0;
+  lastBeatScheduled = -1;
+
+  document.getElementById('startScreen').style.display = 'none';
+  document.getElementById('hud').classList.add('active');
+  document.getElementById('pauseBtn').classList.add('active');
+  document.getElementById('feverGauge').style.display = 'block';
+  document.getElementById('resultScreen').classList.remove('active');
+
+  gameState = 'playing';
+  songStartTime = performance.now() / 1000;
+  lastFrameTime = songStartTime;
+  requestAnimationFrame(gameLoop);
+}
+
+// ─── Game Loop ───
+function gameLoop(timestamp) {
+  if (gameState !== 'playing') return;
+
+  const now = timestamp / 1000;
+  const dt = Math.min(now - lastFrameTime, 0.05);
+  lastFrameTime = now;
+  songTime = now - songStartTime;
+
+  // Schedule BG beats
+  const beatNum = Math.floor(songTime / beatInterval);
+  if (beatNum > lastBeatScheduled && audioCtx) {
+    lastBeatScheduled = beatNum;
+    const nextBeatTime = audioCtx.currentTime + 0.01;
+    playBGBeat(nextBeatTime);
+  }
+
+  // Update notes
+  const hitY = H() * HIT_Y_RATIO;
+  const approachTime = hitY / noteSpeed;
+
+  for (const note of notes) {
+    if (!note.active) continue;
+    const timeDiff = note.time - songTime;
+    note.y = hitY - timeDiff * noteSpeed;
+
+    // Miss detection
+    if (timeDiff < -0.2 && !note.hit) {
+      note.active = false;
+      note.hit = true;
+      registerJudgment('miss', note);
+    }
+  }
+
+  // Update particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 400 * dt;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // Fever timer
+  if (feverActive) {
+    feverTimer -= dt;
+    if (feverTimer <= 0) {
+      feverActive = false;
+      document.getElementById('feverLabel').classList.remove('active');
+    }
+  }
+
+  // Judgment fade
+  if (judgmentOpacity > 0) {
+    judgmentOpacity -= dt * 3;
+  }
+
+  // Check song end
+  if (songTime >= songDuration + 1) {
+    endGame();
+    return;
+  }
+
+  draw();
+  updateHUD();
+  requestAnimationFrame(gameLoop);
+}
+
+// ─── Drawing ───
+function draw() {
+  const w = W(), h = H();
+  ctx.clearRect(0, 0, w, h);
+
+  // Background gradient
+  const bg = ctx.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, '#0a0a2e');
+  bg.addColorStop(0.5, '#15103a');
+  bg.addColorStop(1, '#0a0a1a');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+
+  // Lane lines
+  const laneW = w / LANE_COUNT;
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i < LANE_COUNT; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * laneW, 0);
+    ctx.lineTo(i * laneW, h);
+    ctx.stroke();
+  }
+
+  // Center divider (left side / right side)
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(w / 2, 0);
+  ctx.lineTo(w / 2, h);
+  ctx.stroke();
+
+  // Hit line
+  const hitY = h * HIT_Y_RATIO;
+  const hitGrad = ctx.createLinearGradient(0, hitY - 2, 0, hitY + 2);
+  hitGrad.addColorStop(0, 'rgba(255,255,255,0)');
+  hitGrad.addColorStop(0.5, 'rgba(255,255,255,0.3)');
+  hitGrad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = hitGrad;
+  ctx.fillRect(0, hitY - 2, w, 4);
+
+  // Hit zone circles
+  for (let i = 0; i < LANE_COUNT; i++) {
+    const cx = (i + 0.5) * laneW;
+    ctx.beginPath();
+    ctx.arc(cx, hitY, 32, 0, Math.PI * 2);
+    ctx.strokeStyle = LANE_COLORS[i] + '40';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Inner glow
+    ctx.beginPath();
+    ctx.arc(cx, hitY, 28, 0, Math.PI * 2);
+    ctx.fillStyle = LANE_COLORS[i] + '10';
+    ctx.fill();
+  }
+
+  // Notes
+  for (const note of notes) {
+    if (!note.active || note.y < -60 || note.y > h + 30) continue;
+    drawNote(note, laneW, hitY);
+  }
+
+  // Particles
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Judgment text
+  if (judgmentOpacity > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, judgmentOpacity);
+    ctx.font = '900 38px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = judgmentColor;
+    ctx.shadowColor = judgmentColor;
+    ctx.shadowBlur = 20;
+    ctx.fillText(judgmentText, w / 2, h * 0.38);
+    ctx.restore();
+  }
+
+  // Fever overlay
+  if (feverActive) {
+    ctx.save();
+    ctx.globalAlpha = 0.04 + Math.sin(songTime * 8) * 0.02;
+    const feverGrad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w);
+    feverGrad.addColorStop(0, '#ff6ec7');
+    feverGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = feverGrad;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
+  // Progress bar at bottom
+  const progress = Math.min(1, songTime / songDuration);
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.fillRect(0, h - 3, w, 3);
+  const pGrad = ctx.createLinearGradient(0, 0, w * progress, 0);
+  pGrad.addColorStop(0, '#7c4dff');
+  pGrad.addColorStop(1, '#ff6ec7');
+  ctx.fillStyle = pGrad;
+  ctx.fillRect(0, h - 3, w * progress, 3);
+}
+
+function drawNote(note, laneW, hitY) {
+  const cx = (note.lane + 0.5) * laneW;
+  const cy = note.y;
+  const color = LANE_COLORS[note.lane];
+
+  if (note.type === 'tap') {
+    // Glow
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 15;
+
+    // Circle note
+    ctx.beginPath();
+    ctx.arc(cx, cy, 24, 0, Math.PI * 2);
+    const g = ctx.createRadialGradient(cx, cy - 5, 2, cx, cy, 24);
+    g.addColorStop(0, '#fff');
+    g.addColorStop(0.4, color);
+    g.addColorStop(1, color + '80');
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // Border
+    ctx.beginPath();
+    ctx.arc(cx, cy, 24, 0, Math.PI * 2);
+    ctx.strokeStyle = '#fff8';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  } else {
+    // Swipe note — diamond shape with arrow
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 15;
+
+    ctx.translate(cx, cy);
+    ctx.rotate(Math.PI / 4);
+    const size = 20;
+    ctx.beginPath();
+    ctx.rect(-size, -size, size * 2, size * 2);
+    const g = ctx.createRadialGradient(0, -3, 1, 0, 0, size);
+    g.addColorStop(0, '#fff');
+    g.addColorStop(0.5, color);
+    g.addColorStop(1, color + '60');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = '#fff8';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    // Arrow indicator
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.fillStyle = '#fff';
+    ctx.font = '700 16px system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const arrows = { swipe_up: '↑', swipe_down: '↓', swipe_left: '←', swipe_right: '→' };
+    ctx.fillText(arrows[note.type] || '↑', 0, 0);
+    ctx.restore();
+  }
+}
+
+// ─── HUD ───
+function updateHUD() {
+  document.getElementById('scoreDisplay').textContent = score.toLocaleString();
+  document.getElementById('comboDisplay').textContent = combo > 2 ? combo + ' COMBO' : '';
+  document.getElementById('feverFill').style.height = (feverActive ? 100 : Math.min(100, fever)) + '%';
+}
+
+// ─── Judgment ───
+function registerJudgment(type, note) {
+  const colors = { perfect: '#ff6ec7', great: '#7c4dff', good: '#00e5ff', miss: '#ff4444' };
+  const labels = { perfect: 'PERFECT', great: 'GREAT', good: 'GOOD', miss: 'MISS' };
+  const scores = { perfect: 300, great: 200, good: 100, miss: 0 };
+
+  judgments[type]++;
+  judgmentText = labels[type];
+  judgmentColor = colors[type];
+  judgmentOpacity = 1.5;
+
+  const multi = feverActive ? 2 : 1;
+
+  if (type === 'miss') {
+    combo = 0;
+    fever = Math.max(0, fever - 10);
+  } else {
+    combo++;
+    if (combo > maxCombo) maxCombo = combo;
+    score += scores[type] * multi + combo * 2;
+    fever = Math.min(100, fever + (type === 'perfect' ? 8 : type === 'great' ? 5 : 2));
+
+    if (fever >= 100 && !feverActive) {
+      feverActive = true;
+      feverTimer = 5;
+      fever = 0;
+      document.getElementById('feverLabel').classList.add('active');
+    }
+
+    playHitSound(type);
+    spawnParticles(note);
+  }
+  if (type === 'miss') playHitSound('miss');
+}
+
+function spawnParticles(note) {
+  const laneW = W() / LANE_COUNT;
+  const cx = (note.lane + 0.5) * laneW;
+  const cy = H() * HIT_Y_RATIO;
+  const color = LANE_COLORS[note.lane];
+  for (let i = 0; i < 12; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 100 + Math.random() * 250;
+    particles.push({
+      x: cx, y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 100,
+      life: 0.4 + Math.random() * 0.3,
+      maxLife: 0.7,
+      size: 2 + Math.random() * 4,
+      color,
+    });
+  }
+}
+
+// ─── Input Handling ───
+const activeTouches = {};
+
+function getLane(x) {
+  return Math.floor(x / (W() / LANE_COUNT));
+}
+
+function tryHitNote(lane, swipeDir) {
+  const hitY = H() * HIT_Y_RATIO;
+  let best = null;
+  let bestDiff = Infinity;
+
+  for (const note of notes) {
+    if (!note.active || note.hit || note.lane !== lane) continue;
+    const timeDiff = Math.abs(note.time - songTime);
+    if (timeDiff < bestDiff && timeDiff < 0.3) {
+      // Check type matching for swipe notes
+      if (note.type !== 'tap' && swipeDir) {
+        if (note.type !== 'swipe_' + swipeDir) continue;
+      }
+      if (note.type !== 'tap' && !swipeDir) continue;
+      if (note.type === 'tap' && swipeDir) continue; // swipe on tap = still allow
+
+      bestDiff = timeDiff;
+      best = note;
+    }
+  }
+
+  // Also try: allow tap on any note type as fallback
+  if (!best && !swipeDir) {
+    for (const note of notes) {
+      if (!note.active || note.hit || note.lane !== lane) continue;
+      const timeDiff = Math.abs(note.time - songTime);
+      if (timeDiff < bestDiff && timeDiff < 0.3) {
+        bestDiff = timeDiff;
+        best = note;
+      }
+    }
+  }
+
+  if (best) {
+    best.hit = true;
+    best.active = false;
+    if (bestDiff < 0.05) registerJudgment('perfect', best);
+    else if (bestDiff < 0.1) registerJudgment('great', best);
+    else registerJudgment('good', best);
+  }
+}
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (gameState !== 'playing') return;
+  for (const touch of e.changedTouches) {
+    activeTouches[touch.identifier] = {
+      sx: touch.clientX,
+      sy: touch.clientY,
+      lane: getLane(touch.clientX),
+      time: performance.now(),
+    };
+    // Immediate tap hit
+    tryHitNote(getLane(touch.clientX), null);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (gameState !== 'playing') return;
+  for (const touch of e.changedTouches) {
+    const start = activeTouches[touch.identifier];
+    if (!start) continue;
+    const dx = touch.clientX - start.sx;
+    const dy = touch.clientY - start.sy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 30) {
+      let dir;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        dir = dx > 0 ? 'right' : 'left';
+      } else {
+        dir = dy > 0 ? 'down' : 'up';
+      }
+      tryHitNote(start.lane, dir);
+    }
+    delete activeTouches[touch.identifier];
+  }
+}, { passive: false });
+
+// Mouse fallback for desktop testing
+let mouseDown = false;
+let mouseStart = { x: 0, y: 0 };
+
+canvas.addEventListener('mousedown', e => {
+  if (gameState !== 'playing') return;
+  mouseDown = true;
+  mouseStart = { x: e.clientX, y: e.clientY };
+  tryHitNote(getLane(e.clientX), null);
+});
+
+canvas.addEventListener('mouseup', e => {
+  if (gameState !== 'playing') return;
+  if (!mouseDown) return;
+  mouseDown = false;
+  const dx = e.clientX - mouseStart.x;
+  const dy = e.clientY - mouseStart.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist > 30) {
+    let dir;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      dir = dx > 0 ? 'right' : 'left';
+    } else {
+      dir = dy > 0 ? 'down' : 'up';
+    }
+    tryHitNote(getLane(mouseStart.x), dir);
+  }
+});
+
+// Keyboard fallback (D, F, J, K)
+const KEY_MAP = { d: 0, f: 1, j: 2, k: 3 };
+document.addEventListener('keydown', e => {
+  if (gameState !== 'playing') return;
+  const lane = KEY_MAP[e.key.toLowerCase()];
+  if (lane !== undefined) tryHitNote(lane, null);
+});
+
+// ─── Pause ───
+function togglePause() {
+  if (gameState === 'playing') {
+    gameState = 'paused';
+    document.getElementById('pauseOverlay').classList.add('active');
+  } else if (gameState === 'paused') {
+    gameState = 'playing';
+    document.getElementById('pauseOverlay').classList.remove('active');
+    lastFrameTime = performance.now() / 1000;
+    songStartTime = lastFrameTime - songTime;
+    requestAnimationFrame(gameLoop);
+  }
+}
+
+// ─── End Game ───
+function endGame() {
+  gameState = 'result';
+  document.getElementById('hud').classList.remove('active');
+  document.getElementById('pauseBtn').classList.remove('active');
+  document.getElementById('feverGauge').style.display = 'none';
+  document.getElementById('feverLabel').classList.remove('active');
+
+  document.getElementById('finalScore').textContent = score.toLocaleString();
+  document.getElementById('maxComboDisplay').textContent = 'MAX COMBO: ' + maxCombo;
+  document.getElementById('rPerfect').textContent = judgments.perfect;
+  document.getElementById('rGreat').textContent = judgments.great;
+  document.getElementById('rGood').textContent = judgments.good;
+  document.getElementById('rMiss').textContent = judgments.miss;
+  document.getElementById('resultScreen').classList.add('active');
+}
+
+function quitToMenu() {
+  gameState = 'menu';
+  document.getElementById('startScreen').style.display = 'flex';
+  document.getElementById('hud').classList.remove('active');
+  document.getElementById('pauseBtn').classList.remove('active');
+  document.getElementById('pauseOverlay').classList.remove('active');
+  document.getElementById('resultScreen').classList.remove('active');
+  document.getElementById('feverGauge').style.display = 'none';
+  document.getElementById('feverLabel').classList.remove('active');
+}
+</script>
+</body>
+</html>
